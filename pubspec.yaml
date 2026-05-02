@@ -1,0 +1,19 @@
+name: simple_https_service
+description: "A package for simple HTTPS communication with timing control and response handling."
+version: 1.0.0
+repository: https://github.com/MasahideMori-SimpleAppli/simple_https_service
+
+environment:
+  sdk: ">=2.17.0 <4.0.0"
+  flutter: ">=3.27.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  web: ^1.1.1
+  http: ^1.3.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  simple_lint: ^2.0.0
