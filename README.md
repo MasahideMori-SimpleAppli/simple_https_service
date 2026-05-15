@@ -14,10 +14,11 @@ Two implementations are provided:
 ## Features
 - HTTPS-only POST (http URLs are rejected with an exception)
 - `jwt` parameter to automatically set the `Authorization: Bearer` header
-- Unified `ServerResponse` with five statuses: `success`, `timeout`, `serverError`, `otherError`, `signInRequired`
+- Unified `ServerResponse` with six statuses: `success`, `timeout`, `serverError`, `otherError`, `signInRequired`, `cancelled`
 - Response body as JSON, raw bytes, or UTF-8 text
 - Raw binary upload via `postBytes` (`application/octet-stream` by default)
 - `multipart/form-data` upload via `postMultipart` (text fields + binary files)
+- Caller-driven request cancellation via `CancelToken` (shareable across multiple requests)
 - `TimingManager`: Singleton that enforces a minimum interval between requests
 - `RetryConfig`: Singleton for automatic retry with exponential backoff and configurable jitter
 
@@ -45,6 +46,8 @@ switch (res.resultStatus) {
     print('sign-in required');
   case EnumServerResponseStatus.otherError:
     print('error: ${res.errorDetail}');
+  case EnumServerResponseStatus.cancelled:
+    print('cancelled');
 }
 ```
 
@@ -185,6 +188,35 @@ await HttpsService.post(url, body, type, adjustTiming: false);
 
 // Use a custom interval (milliseconds).
 await HttpsService.post(url, body, type, intervalMs: 500);
+```
+
+### Request cancellation
+
+Pass a `CancelToken` to abort an in-flight request. Cancellation also
+interrupts the TimingManager wait and exponential-backoff delay between
+retries. A single token can be shared across multiple requests; one
+`cancel()` call aborts all of them, which is useful for scenarios such as
+"cancel every request issued from this screen on navigation away".
+Cancelled requests return with `EnumServerResponseStatus.cancelled`, so
+UI and error reporting code can distinguish them from real failures.
+
+```dart
+final token = CancelToken();
+
+// Trigger cancellation from elsewhere, e.g. a back button:
+// onPressed: () => token.cancel(),
+
+final res = await HttpsService.post(
+  'https://api.example.com/data',
+  body,
+  EnumPostEncodeType.json,
+  cancelToken: token,
+);
+
+if (res.resultStatus == EnumServerResponseStatus.cancelled) {
+  // User cancelled; suppress error toast / retry.
+  return;
+}
 ```
 
 ### Automatic retry

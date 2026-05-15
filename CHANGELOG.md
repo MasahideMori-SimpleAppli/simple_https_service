@@ -1,3 +1,25 @@
+## 2.0.0 (2026-05-15)
+
+* Added `CancelToken`: a caller-driven cancellation token that can be shared
+  across multiple in-flight requests. Calling `cancel()` aborts every
+  request currently using the token by closing the underlying `http.Client`,
+  and also interrupts any pending TimingManager wait or exponential-backoff
+  delay. (How `Client.close()` aborts the in-flight request is delegated
+  to the `http` package and the platform; this package does not depend on
+  any particular underlying transport.)
+* Added `EnumServerResponseStatus.cancelled` and
+  `UtilServerResponse.cancelled()` so cancelled requests can be
+  distinguished from real failures in UI / error reporting paths.
+* All POST methods on `HttpsService` and `HttpsServiceForNative`
+  (`post`, `customPost`, `postBytes`, `postMultipart`) now accept an
+  optional `cancelToken` parameter.
+* BREAKING: `EnumServerResponseStatus` gained a new value (`cancelled`).
+  Any exhaustive `switch` on the enum will need an additional case.
+* Internal: `HttpsService` no longer uses the `http.post()` / `http.send()`
+  static helpers and instead manages an `http.Client` per attempt so it
+  can be closed to abort an in-flight request. No behavior change for
+  callers that do not use cancellation.
+
 ## 1.1.0 (2026-05-15)
 
 * Added `postBytes` for sending raw binary payloads with a custom Content-Type

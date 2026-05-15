@@ -18,6 +18,8 @@ class HttpsServiceForNative {
   /// it marks EnumServerResponseStatus.serverError,
   /// a communication timeout is marked as EnumServerResponseStatus.timeout,
   /// and other unknown errors are marked as EnumServerResponseStatus.otherError.
+  /// A request cancelled via [cancelToken] is marked as
+  /// EnumServerResponseStatus.cancelled.
   ///
   /// (ja) Httpsを構築してPOSTします。
   /// このクラスはFlutter webでは利用できません。
@@ -27,6 +29,7 @@ class HttpsServiceForNative {
   /// それ以外の場合は400番台でも500番台でもEnumServerResponseStatus.serverErrorを、
   /// 通信時のタイムアウトはEnumServerResponseStatus.timeoutを、
   /// その他の未知のエラーはEnumServerResponseStatus.otherErrorとしてマークします。
+  /// [cancelToken]によりキャンセルされた場合はEnumServerResponseStatus.cancelledを返します。
   ///
   /// * [url] : The URL to post to. Only https is permitted;
   /// anything else will return an error response.
@@ -66,6 +69,8 @@ class HttpsServiceForNative {
   /// * [maxRetries] : Per-call override for RetryConfig.maxRetries.
   /// * [baseDelay] : Per-call override for RetryConfig.baseDelay.
   /// * [maxJitter] : Per-call override for RetryConfig.maxJitter.
+  /// * [cancelToken] : Optional token used to cancel this request. The same
+  /// token can be shared across multiple requests to cancel them at once.
   static Future<ServerResponse> post(
       String url, Map<String, dynamic> body, EnumPostEncodeType type,
       {String? jwt,
@@ -80,7 +85,8 @@ class HttpsServiceForNative {
       bool Function(String url, ServerResponse res, Object? error)? retryIf,
       int? maxRetries,
       Duration? baseDelay,
-      Duration? maxJitter}) async {
+      Duration? maxJitter,
+      CancelToken? cancelToken}) async {
     Map<String, String> headers = {};
     if (jwt != null) {
       headers['Authorization'] = 'Bearer $jwt';
@@ -106,7 +112,8 @@ class HttpsServiceForNative {
             retryIf: retryIf,
             maxRetries: maxRetries,
             baseDelay: baseDelay,
-            maxJitter: maxJitter);
+            maxJitter: maxJitter,
+            cancelToken: cancelToken);
       case EnumPostEncodeType.json:
         if (charset == null) {
           headers['Content-Type'] = 'application/json; charset=utf-8';
@@ -125,7 +132,8 @@ class HttpsServiceForNative {
             retryIf: retryIf,
             maxRetries: maxRetries,
             baseDelay: baseDelay,
-            maxJitter: maxJitter);
+            maxJitter: maxJitter,
+            cancelToken: cancelToken);
     }
   }
 
@@ -139,6 +147,8 @@ class HttpsServiceForNative {
   /// it marks EnumServerResponseStatus.serverError,
   /// a communication timeout is marked as EnumServerResponseStatus.timeout,
   /// and other unknown errors are marked as EnumServerResponseStatus.otherError.
+  /// A request cancelled via [cancelToken] is marked as
+  /// EnumServerResponseStatus.cancelled.
   ///
   /// (ja) Httpsを構築してPOSTします。
   /// これはカスタマイズ性を高めたバージョンで、簡単に利用したい場合は代わりにpostが使えます。
@@ -148,6 +158,7 @@ class HttpsServiceForNative {
   /// それ以外の場合は400番台でも500番台でもEnumServerResponseStatus.serverErrorを、
   /// 通信時のタイムアウトはEnumServerResponseStatus.timeoutを、
   /// その他の未知のエラーはEnumServerResponseStatus.otherErrorとしてマークします。
+  /// [cancelToken]によりキャンセルされた場合はEnumServerResponseStatus.cancelledを返します。
   ///
   /// * [url] : The URL to post to. Only https is permitted;
   /// anything else will return an error response.
@@ -179,6 +190,7 @@ class HttpsServiceForNative {
   /// * [maxRetries] : Per-call override for RetryConfig.maxRetries.
   /// * [baseDelay] : Per-call override for RetryConfig.baseDelay.
   /// * [maxJitter] : Per-call override for RetryConfig.maxJitter.
+  /// * [cancelToken] : Optional token used to cancel this request.
   static Future<ServerResponse> customPost(
       String url, Object? body, Map<String, String> headers,
       {Encoding? encoding,
@@ -192,26 +204,29 @@ class HttpsServiceForNative {
       bool Function(String url, ServerResponse res, Object? error)? retryIf,
       int? maxRetries,
       Duration? baseDelay,
-      Duration? maxJitter}) async {
+      Duration? maxJitter,
+      CancelToken? cancelToken}) async {
     final String httpsURL = UtilCheckURL.validateHttpsUrl(url);
     return runPostWithRetry(
       validatedUrl: httpsURL,
-      send: () async {
-        final HttpClient client = HttpClient();
+      send: (token) async {
+        final HttpClient httpClient = HttpClient();
         if (badCertificateCallback != null) {
-          client.badCertificateCallback =
+          httpClient.badCertificateCallback =
               (X509Certificate cert, String host, int port) =>
                   badCertificateCallback(cert, host, port);
         }
-        client.connectionTimeout = connectionTimeout;
-        final ioClient = IOClient(client);
+        httpClient.connectionTimeout = connectionTimeout;
+        final ioClient = IOClient(httpClient);
+        token?.attachClient(ioClient);
         try {
           return await ioClient
               .post(Uri.parse(httpsURL),
                   headers: headers, body: body, encoding: encoding)
               .timeout(responseTimeout);
         } finally {
-          client.close();
+          token?.detachClient(ioClient);
+          ioClient.close();
         }
       },
       resType: resType,
@@ -222,6 +237,7 @@ class HttpsServiceForNative {
       baseDelay: baseDelay,
       maxJitter: maxJitter,
       isExtraTimeoutError: (e) => e is SocketException,
+      cancelToken: cancelToken,
     );
   }
 
@@ -251,6 +267,7 @@ class HttpsServiceForNative {
   /// * [maxRetries] : Per-call override for RetryConfig.maxRetries.
   /// * [baseDelay] : Per-call override for RetryConfig.baseDelay.
   /// * [maxJitter] : Per-call override for RetryConfig.maxJitter.
+  /// * [cancelToken] : Optional token used to cancel this request.
   static Future<ServerResponse> postBytes(String url, Uint8List bytes,
       {String contentType = 'application/octet-stream',
       String? jwt,
@@ -264,7 +281,8 @@ class HttpsServiceForNative {
       bool Function(String url, ServerResponse res, Object? error)? retryIf,
       int? maxRetries,
       Duration? baseDelay,
-      Duration? maxJitter}) async {
+      Duration? maxJitter,
+      CancelToken? cancelToken}) async {
     final Map<String, String> headers = {'Content-Type': contentType};
     if (jwt != null) {
       headers['Authorization'] = 'Bearer $jwt';
@@ -279,7 +297,8 @@ class HttpsServiceForNative {
         retryIf: retryIf,
         maxRetries: maxRetries,
         baseDelay: baseDelay,
-        maxJitter: maxJitter);
+        maxJitter: maxJitter,
+        cancelToken: cancelToken);
   }
 
   /// (en) Build the https and POST as multipart/form-data.
@@ -307,6 +326,7 @@ class HttpsServiceForNative {
   /// * [maxRetries] : Per-call override for RetryConfig.maxRetries.
   /// * [baseDelay] : Per-call override for RetryConfig.baseDelay.
   /// * [maxJitter] : Per-call override for RetryConfig.maxJitter.
+  /// * [cancelToken] : Optional token used to cancel this request.
   static Future<ServerResponse> postMultipart(String url,
       {Map<String, String> fields = const {},
       List<MultipartFileSpec> files = const [],
@@ -321,19 +341,21 @@ class HttpsServiceForNative {
       bool Function(String url, ServerResponse res, Object? error)? retryIf,
       int? maxRetries,
       Duration? baseDelay,
-      Duration? maxJitter}) async {
+      Duration? maxJitter,
+      CancelToken? cancelToken}) async {
     final String httpsURL = UtilCheckURL.validateHttpsUrl(url);
     return runPostWithRetry(
       validatedUrl: httpsURL,
-      send: () async {
-        final HttpClient client = HttpClient();
+      send: (token) async {
+        final HttpClient httpClient = HttpClient();
         if (badCertificateCallback != null) {
-          client.badCertificateCallback =
+          httpClient.badCertificateCallback =
               (X509Certificate cert, String host, int port) =>
                   badCertificateCallback(cert, host, port);
         }
-        client.connectionTimeout = connectionTimeout;
-        final ioClient = IOClient(client);
+        httpClient.connectionTimeout = connectionTimeout;
+        final ioClient = IOClient(httpClient);
+        token?.attachClient(ioClient);
         try {
           final request = http.MultipartRequest('POST', Uri.parse(httpsURL));
           if (jwt != null) {
@@ -354,7 +376,8 @@ class HttpsServiceForNative {
               await ioClient.send(request).timeout(responseTimeout);
           return await http.Response.fromStream(streamed);
         } finally {
-          client.close();
+          token?.detachClient(ioClient);
+          ioClient.close();
         }
       },
       resType: resType,
@@ -365,6 +388,7 @@ class HttpsServiceForNative {
       baseDelay: baseDelay,
       maxJitter: maxJitter,
       isExtraTimeoutError: (e) => e is SocketException,
+      cancelToken: cancelToken,
     );
   }
 }

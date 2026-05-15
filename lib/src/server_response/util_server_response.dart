@@ -129,4 +129,14 @@ class UtilServerResponse {
     return ServerResponse(
         null, EnumServerResponseStatus.otherError, null, e.toString());
   }
+
+  /// (en) Creates a server response object for a request that was cancelled
+  /// by the caller via a CancelToken.
+  ///
+  /// (ja) CancelTokenを通じて呼び出し側がキャンセルしたリクエスト用の
+  /// サーバー応答オブジェクトを作成します。
+  static ServerResponse cancelled() {
+    return ServerResponse(
+        null, EnumServerResponseStatus.cancelled, null, "Cancelled.");
+  }
 }

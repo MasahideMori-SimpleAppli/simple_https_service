@@ -11,10 +11,11 @@
 ## 機能
 - HTTPSのみのPOST（httpのURLは例外をスローして拒否）
 - `jwt` パラメータで `Authorization: Bearer` ヘッダーを自動付加
-- 5つのステータスを持つ統一 `ServerResponse`: `success`、`timeout`、`serverError`、`otherError`、`signInRequired`
+- 6つのステータスを持つ統一 `ServerResponse`: `success`、`timeout`、`serverError`、`otherError`、`signInRequired`、`cancelled`
 - レスポンスボディをJSON・バイト列・UTF-8テキストとして取得可能
 - `postBytes` による生バイナリ送信（デフォルト `application/octet-stream`）
 - `postMultipart` による `multipart/form-data` 送信（テキストフィールド＋バイナリファイル）
+- `CancelToken` による送信中リクエストのキャンセル（複数リクエスト共有可）
 - `TimingManager`: リクエスト間の最小間隔を強制するシングルトン
 - `RetryConfig`: 指数バックオフと設定可能なジッターによる自動リトライのシングルトン
 
@@ -42,6 +43,8 @@ switch (res.resultStatus) {
     print('サインインが必要です');
   case EnumServerResponseStatus.otherError:
     print('エラー: ${res.errorDetail}');
+  case EnumServerResponseStatus.cancelled:
+    print('キャンセルされました');
 }
 ```
 
@@ -178,6 +181,31 @@ await HttpsService.post(url, body, type, adjustTiming: false);
 
 // 間隔をカスタマイズする場合（ミリ秒単位）。
 await HttpsService.post(url, body, type, intervalMs: 500);
+```
+
+### リクエストのキャンセル
+
+`CancelToken` を使うと、送信中（およびリトライ待機中・タイミング待機中）のリクエストを呼び出し側から中断できます。  
+1つのトークンを複数のリクエストで共有でき、`cancel()` を1回呼ぶだけで全て同時にキャンセルされます。  
+キャンセルされたリクエストは `EnumServerResponseStatus.cancelled` で返るため、UIやエラーレポートで「ユーザーが中断した」場合と「通信失敗」を区別できます。
+
+```dart
+final token = CancelToken();
+
+// 画面離脱・戻るボタンなどから呼び出す
+// onPressed: () => token.cancel(),
+
+final res = await HttpsService.post(
+  'https://api.example.com/data',
+  body,
+  EnumPostEncodeType.json,
+  cancelToken: token,
+);
+
+if (res.resultStatus == EnumServerResponseStatus.cancelled) {
+  // ユーザーがキャンセルしたので、エラー表示や再試行はしない
+  return;
+}
 ```
 
 ### 自動リトライ

@@ -105,6 +105,8 @@ class _MyAppState extends State<MyApp> {
                           // TODO: Handle this case.
                           case EnumServerResponseStatus.signInRequired:
                           // TODO: Handle this case.
+                          case EnumServerResponseStatus.cancelled:
+                          // TODO: Handle this case.
                         }
                       },
                       child: const Text('POST'),
@@ -153,6 +155,8 @@ class _MyAppState extends State<MyApp> {
                           // TODO: Handle this case.
                           case EnumServerResponseStatus.signInRequired:
                           // TODO: The token has expired or is invalid.
+                          case EnumServerResponseStatus.cancelled:
+                          // TODO: Handle this case.
                         }
                       },
                       child: const Text('POST with JWT'),

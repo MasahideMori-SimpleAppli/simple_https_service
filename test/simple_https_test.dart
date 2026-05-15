@@ -52,6 +52,7 @@ void main() {
           EnumServerResponseStatus.serverError,
           EnumServerResponseStatus.otherError,
           EnumServerResponseStatus.signInRequired,
+          EnumServerResponseStatus.cancelled,
         ]),
       );
     });
@@ -75,6 +76,55 @@ void main() {
       final res = UtilServerResponse.signInRequired();
       expect(res.resultStatus, EnumServerResponseStatus.signInRequired);
       expect(res.errorDetail, 'Unauthenticated.');
+    });
+
+    test('cancelled creates response with cancelled status', () {
+      final res = UtilServerResponse.cancelled();
+      expect(res.resultStatus, EnumServerResponseStatus.cancelled);
+      expect(res.response, isNull);
+      expect(res.errorDetail, 'Cancelled.');
+    });
+  });
+
+  group('CancelToken', () {
+    test('starts in non-cancelled state', () {
+      final token = CancelToken();
+      expect(token.isCancelled, isFalse);
+    });
+
+    test('cancel() flips isCancelled to true', () {
+      final token = CancelToken();
+      token.cancel();
+      expect(token.isCancelled, isTrue);
+    });
+
+    test('cancel() is idempotent', () {
+      final token = CancelToken();
+      token.cancel();
+      token.cancel();
+      expect(token.isCancelled, isTrue);
+    });
+
+    test('whenCancelled completes when cancel() is called', () async {
+      final token = CancelToken();
+      final future = token.whenCancelled;
+      token.cancel();
+      await future;
+      expect(token.isCancelled, isTrue);
+    });
+
+    test('pre-cancelled token: HttpsService.customPost returns cancelled',
+        () async {
+      final token = CancelToken();
+      token.cancel();
+      final res = await HttpsService.customPost(
+        'https://example.invalid/api',
+        'x',
+        const {'Content-Type': 'text/plain'},
+        cancelToken: token,
+        adjustTiming: false,
+      );
+      expect(res.resultStatus, EnumServerResponseStatus.cancelled);
     });
   });
 
