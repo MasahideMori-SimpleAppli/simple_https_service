@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'package:simple_https_service/simple_https_service.dart';
+import 'package:simple_https_service/src/network/post_runner.dart';
 
 class HttpsService {
   /// (en) Build the https and POST it.
@@ -158,59 +160,133 @@ class HttpsService {
       Duration? baseDelay,
       Duration? maxJitter}) async {
     final String httpsURL = UtilCheckURL.validateHttpsUrl(url);
+    return runPostWithRetry(
+      validatedUrl: httpsURL,
+      send: () => http
+          .post(Uri.parse(httpsURL),
+              headers: headers, body: body, encoding: encoding)
+          .timeout(timeout),
+      resType: resType,
+      adjustTiming: adjustTiming,
+      intervalMs: intervalMs,
+      retryIf: retryIf,
+      maxRetries: maxRetries,
+      baseDelay: baseDelay,
+      maxJitter: maxJitter,
+    );
+  }
 
-    final effectiveRetryIf = retryIf ?? RetryConfig().defaultCondition;
-    final effectiveMaxRetries =
-        effectiveRetryIf != null ? (maxRetries ?? RetryConfig().maxRetries) : 0;
-    final effectiveBaseDelayMs =
-        (baseDelay ?? RetryConfig().baseDelay).inMilliseconds;
-    final effectiveMaxJitterMs =
-        (maxJitter ?? RetryConfig().maxJitter).inMilliseconds;
-    final random = Random();
-
-    for (int attempt = 0; attempt <= effectiveMaxRetries; attempt++) {
-      if (attempt > 0) {
-        final backoffMs = effectiveBaseDelayMs * (1 << (attempt - 1));
-        final jitterMs = effectiveMaxJitterMs > 0
-            ? random.nextInt(effectiveMaxJitterMs + 1)
-            : 0;
-        await Future.delayed(Duration(milliseconds: backoffMs + jitterMs));
-      }
-
-      late ServerResponse result;
-      Object? caughtError;
-
-      try {
-        if (adjustTiming) {
-          await TimingManager().adjustTiming(intervalMs: intervalMs);
-        }
-        final http.Response r = await http
-            .post(Uri.parse(httpsURL),
-                headers: headers, body: body, encoding: encoding)
-            .timeout(timeout);
-        if (r.statusCode >= 200 && r.statusCode <= 299) {
-          result = UtilServerResponse.success(r, resType: resType);
-        } else if (r.statusCode == 401) {
-          result = UtilServerResponse.signInRequired(res: r, resType: resType);
-        } else {
-          result = UtilServerResponse.serverError(r, resType: resType);
-        }
-        caughtError = null;
-      } on TimeoutException catch (e) {
-        result = UtilServerResponse.timeout(e);
-        caughtError = e;
-      } catch (e) {
-        result = UtilServerResponse.otherError(e);
-        caughtError = e;
-      }
-
-      if (effectiveRetryIf == null ||
-          attempt >= effectiveMaxRetries ||
-          !effectiveRetryIf(httpsURL, result, caughtError)) {
-        return result;
-      }
+  /// (en) Build the https and POST a raw binary payload.
+  /// Useful for sending a single binary (image, PDF, encrypted blob, etc.)
+  /// with a custom Content-Type. The body is sent as-is without any encoding.
+  ///
+  /// (ja) Httpsを構築し、生のバイナリペイロードをPOSTします。
+  /// 画像・PDF・暗号化済みデータなど、単一のバイナリを任意のContent-Typeで
+  /// 送信する場合に使用します。ボディはエンコードされずそのまま送信されます。
+  ///
+  /// * [url] : The URL to post to. Only https is permitted;
+  /// anything else will return an error response.
+  /// * [bytes] : The binary payload to send.
+  /// * [contentType] : The Content-Type header value.
+  /// Defaults to "application/octet-stream".
+  /// * [jwt] : The jwt. It is inserted into the Authorization header.
+  /// * [timeout] : The response timeout.
+  /// * [adjustTiming] : Specify true to automatically adjust the timing.
+  /// * [intervalMs] : The minimum interval between calls that is
+  /// automatically adjusted if adjustTiming is True.
+  /// * [resType] : Formatting the return value from the server.
+  /// * [retryIf] : Per-call retry condition.
+  /// * [maxRetries] : Per-call override for RetryConfig.maxRetries.
+  /// * [baseDelay] : Per-call override for RetryConfig.baseDelay.
+  /// * [maxJitter] : Per-call override for RetryConfig.maxJitter.
+  static Future<ServerResponse> postBytes(String url, Uint8List bytes,
+      {String contentType = 'application/octet-stream',
+      String? jwt,
+      Duration timeout = const Duration(seconds: 30),
+      bool adjustTiming = true,
+      int intervalMs = 1200,
+      EnumServerResponseType resType = EnumServerResponseType.json,
+      bool Function(String url, ServerResponse res, Object? error)? retryIf,
+      int? maxRetries,
+      Duration? baseDelay,
+      Duration? maxJitter}) async {
+    final Map<String, String> headers = {'Content-Type': contentType};
+    if (jwt != null) {
+      headers['Authorization'] = 'Bearer $jwt';
     }
+    return customPost(url, bytes, headers,
+        timeout: timeout,
+        adjustTiming: adjustTiming,
+        intervalMs: intervalMs,
+        resType: resType,
+        retryIf: retryIf,
+        maxRetries: maxRetries,
+        baseDelay: baseDelay,
+        maxJitter: maxJitter);
+  }
 
-    throw StateError('Unexpected end of retry loop');
+  /// (en) Build the https and POST as multipart/form-data.
+  /// Useful for sending text fields together with one or more binary files
+  /// in a single request.
+  ///
+  /// (ja) Httpsを構築し、multipart/form-dataとしてPOSTします。
+  /// テキストフィールドと1つ以上のバイナリファイルを同一リクエストで送信する
+  /// 場合に使用します。
+  ///
+  /// * [url] : The URL to post to. Only https is permitted;
+  /// anything else will return an error response.
+  /// * [fields] : Text fields. Sent as form fields.
+  /// * [files] : File parts. Each entry must specify a field name and bytes.
+  /// * [jwt] : The jwt. It is inserted into the Authorization header.
+  /// * [timeout] : The response timeout.
+  /// * [adjustTiming] : Specify true to automatically adjust the timing.
+  /// * [intervalMs] : The minimum interval between calls that is
+  /// automatically adjusted if adjustTiming is True.
+  /// * [resType] : Formatting the return value from the server.
+  /// * [retryIf] : Per-call retry condition.
+  /// * [maxRetries] : Per-call override for RetryConfig.maxRetries.
+  /// * [baseDelay] : Per-call override for RetryConfig.baseDelay.
+  /// * [maxJitter] : Per-call override for RetryConfig.maxJitter.
+  static Future<ServerResponse> postMultipart(String url,
+      {Map<String, String> fields = const {},
+      List<MultipartFileSpec> files = const [],
+      String? jwt,
+      Duration timeout = const Duration(seconds: 30),
+      bool adjustTiming = true,
+      int intervalMs = 1200,
+      EnumServerResponseType resType = EnumServerResponseType.json,
+      bool Function(String url, ServerResponse res, Object? error)? retryIf,
+      int? maxRetries,
+      Duration? baseDelay,
+      Duration? maxJitter}) async {
+    final String httpsURL = UtilCheckURL.validateHttpsUrl(url);
+    return runPostWithRetry(
+      validatedUrl: httpsURL,
+      send: () async {
+        final request = http.MultipartRequest('POST', Uri.parse(httpsURL));
+        if (jwt != null) {
+          request.headers['Authorization'] = 'Bearer $jwt';
+        }
+        request.fields.addAll(fields);
+        for (final f in files) {
+          request.files.add(http.MultipartFile.fromBytes(
+            f.field,
+            f.bytes,
+            filename: f.filename,
+            contentType:
+                f.contentType != null ? MediaType.parse(f.contentType!) : null,
+          ));
+        }
+        final streamed = await request.send().timeout(timeout);
+        return await http.Response.fromStream(streamed);
+      },
+      resType: resType,
+      adjustTiming: adjustTiming,
+      intervalMs: intervalMs,
+      retryIf: retryIf,
+      maxRetries: maxRetries,
+      baseDelay: baseDelay,
+      maxJitter: maxJitter,
+    );
   }
 }

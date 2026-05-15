@@ -13,6 +13,8 @@
 - `jwt` パラメータで `Authorization: Bearer` ヘッダーを自動付加
 - 5つのステータスを持つ統一 `ServerResponse`: `success`、`timeout`、`serverError`、`otherError`、`signInRequired`
 - レスポンスボディをJSON・バイト列・UTF-8テキストとして取得可能
+- `postBytes` による生バイナリ送信（デフォルト `application/octet-stream`）
+- `postMultipart` による `multipart/form-data` 送信（テキストフィールド＋バイナリファイル）
 - `TimingManager`: リクエスト間の最小間隔を強制するシングルトン
 - `RetryConfig`: 指数バックオフと設定可能なジッターによる自動リトライのシングルトン
 
@@ -82,6 +84,59 @@ switch (res.resultStatus) {
     print('トークンの期限切れまたは無効');
   default:
     print('エラー: ${res.errorDetail}');
+}
+```
+
+### 生バイナリのPOST（`postBytes`）
+
+`postBytes` を使うと、単一のバイナリ（画像・PDF・暗号化済みデータ等）をエンコードせずそのまま送信できます。
+
+```dart
+import 'dart:typed_data';
+import 'package:simple_https_service/simple_https_service.dart';
+
+final Uint8List bytes = ...; // 例: ファイルのバイト列
+final res = await HttpsService.postBytes(
+  'https://api.example.com/upload',
+  bytes,
+  contentType: 'image/png',
+  jwt: 'your_access_token',
+);
+
+if (res.resultStatus == EnumServerResponseStatus.success) {
+  print(res.resBody);
+}
+```
+
+### multipart/form-data でのPOST（`postMultipart`）
+
+`postMultipart` を使うと、テキストフィールドと1つ以上のバイナリファイルを同一リクエストで送信できます。
+入力はリトライ時の再送安全性を担保するため、`MultipartFileSpec` を介したバイト列のみをサポートします。Streamやファイルパスは意図的に受け付けません。
+
+各 `MultipartFileSpec` には任意で `contentType`（例: `"image/png"`）を指定できます。これにより、受信サーバーや後段のストレージ（GCS/S3 等）に正しいMIMEタイプを記録させることができます。省略時は multipart の既定値である `application/octet-stream` が使われます。
+
+```dart
+import 'dart:typed_data';
+import 'package:simple_https_service/simple_https_service.dart';
+
+final Uint8List imageBytes = ...;
+
+final res = await HttpsService.postMultipart(
+  'https://api.example.com/upload',
+  fields: {'app_version': '1.2.3', 'note': 'avatar'},
+  files: [
+    MultipartFileSpec(
+      field: 'avatar',
+      bytes: imageBytes,
+      filename: 'avatar.png',
+      contentType: 'image/png',
+    ),
+  ],
+  jwt: 'your_access_token',
+);
+
+if (res.resultStatus == EnumServerResponseStatus.success) {
+  print(res.resBody);
 }
 ```
 

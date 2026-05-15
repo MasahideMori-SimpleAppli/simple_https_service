@@ -16,6 +16,8 @@ Two implementations are provided:
 - `jwt` parameter to automatically set the `Authorization: Bearer` header
 - Unified `ServerResponse` with five statuses: `success`, `timeout`, `serverError`, `otherError`, `signInRequired`
 - Response body as JSON, raw bytes, or UTF-8 text
+- Raw binary upload via `postBytes` (`application/octet-stream` by default)
+- `multipart/form-data` upload via `postMultipart` (text fields + binary files)
 - `TimingManager`: Singleton that enforces a minimum interval between requests
 - `RetryConfig`: Singleton for automatic retry with exponential backoff and configurable jitter
 
@@ -85,6 +87,63 @@ switch (res.resultStatus) {
     print('token expired or invalid');
   default:
     print('error: ${res.errorDetail}');
+}
+```
+
+### POST raw binary (`postBytes`)
+
+Use `postBytes` to send a single binary payload (image, PDF, encrypted blob, etc.) without any encoding. The body is sent as-is.
+
+```dart
+import 'dart:typed_data';
+import 'package:simple_https_service/simple_https_service.dart';
+
+final Uint8List bytes = ...; // e.g. file bytes
+final res = await HttpsService.postBytes(
+  'https://api.example.com/upload',
+  bytes,
+  contentType: 'image/png',
+  jwt: 'your_access_token',
+);
+
+if (res.resultStatus == EnumServerResponseStatus.success) {
+  print(res.resBody);
+}
+```
+
+### POST multipart/form-data (`postMultipart`)
+
+Use `postMultipart` to send text fields together with one or more binary files.
+Only byte input is supported via `MultipartFileSpec`; streams and file paths are
+intentionally not accepted so that retries can safely re-send the same payload.
+
+Each `MultipartFileSpec` can optionally specify a `contentType` (e.g. `"image/png"`)
+so the receiving server (or downstream storage such as GCS/S3) records the
+correct MIME type. When omitted, the multipart default `application/octet-stream`
+is used.
+
+```dart
+import 'dart:typed_data';
+import 'package:simple_https_service/simple_https_service.dart';
+
+final Uint8List imageBytes = ...;
+
+final res = await HttpsService.postMultipart(
+  'https://api.example.com/upload',
+  fields: {'app_version': '1.2.3', 'note': 'avatar'},
+  files: [
+    MultipartFileSpec(
+      field: 'avatar',
+      bytes: imageBytes,
+      filename: 'avatar.png',
+      contentType: 'image/png',
+    ),
+  ],
+  jwt: 'your_access_token',
+);
+
+if (res.resultStatus == EnumServerResponseStatus.success) {
+  print(res.resBody);
 }
 ```
 

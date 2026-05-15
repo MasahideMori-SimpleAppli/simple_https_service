@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:simple_https_service/simple_https_service.dart';
 
@@ -145,6 +147,40 @@ void main() {
           RetryConfig().defaultCondition!(
               'https://api.example.com/revoke', res, err),
           isFalse);
+    });
+  });
+
+  group('MultipartFileSpec', () {
+    test('constructs with required fields only', () {
+      final spec = MultipartFileSpec(
+        field: 'avatar',
+        bytes: Uint8List.fromList([0, 1, 2, 3]),
+      );
+      expect(spec.field, 'avatar');
+      expect(spec.bytes, Uint8List.fromList([0, 1, 2, 3]));
+      expect(spec.filename, isNull);
+      expect(spec.contentType, isNull);
+    });
+
+    test('constructs with optional filename', () {
+      final spec = MultipartFileSpec(
+        field: 'doc',
+        bytes: Uint8List.fromList([10, 20]),
+        filename: 'a.pdf',
+      );
+      expect(spec.field, 'doc');
+      expect(spec.filename, 'a.pdf');
+      expect(spec.contentType, isNull);
+    });
+
+    test('constructs with optional contentType', () {
+      final spec = MultipartFileSpec(
+        field: 'image',
+        bytes: Uint8List.fromList([1]),
+        filename: 'a.png',
+        contentType: 'image/png',
+      );
+      expect(spec.contentType, 'image/png');
     });
   });
 }
